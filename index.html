@@ -13,19 +13,31 @@
   <div id="root"></div>
   
   <script type="text/babel">
-    const { useState, useRef } = React;
+    const { useState, useRef, useEffect } = React;
 
     // PASTE ALL YOUR NukeEm.jsx CODE BELOW THIS LINE
     // (Starting from "const NukeMemes = () => {" all the way to the closing "}")
     // DO NOT include: import statements or export statements
     
+
+
     const NukeMemes = () => {
       const [currentImage, setCurrentImage] = useState(null);
-        const [nukeCount, setNukeCount] = useState(0);
-        const [history, setHistory] = useState([]);
-        const [lastEffects, setLastEffects] = useState([]);
-        const canvasRef = useRef(null);
-        const fileInputRef = useRef(null);
+      const [nukeCount, setNukeCount] = useState(0);
+      const [history, setHistory] = useState([]);
+      const [lastEffects, setLastEffects] = useState([]);
+      const canvasRef = useRef(null);
+      const fileInputRef = useRef(null);
+
+        useEffect(() => {
+          if (currentImage && canvasRef.current) {
+            const canvas = canvasRef.current;
+            const ctx = canvas.getContext('2d');
+            canvas.width = currentImage.width;
+            canvas.height = currentImage.height;
+            ctx.drawImage(currentImage, 0, 0);
+          }
+        }, [currentImage]);
 
         const loadImage = (file) => {
           const reader = new FileReader();
@@ -217,11 +229,13 @@
           tempCanvas.height = height;
           tempCtx.drawImage(ctx.canvas, 0, 0);
           
-          ctx.globalAlpha = 0.5;
-          
           const segments = 2 + Math.floor(Math.random() * 3);
           const centerX = width / 2;
           const centerY = height / 2;
+
+          ctx.globalAlpha = 0.5;
+          
+        
           
           for (let i = 1; i < segments; i++) {
             ctx.save();
@@ -315,13 +329,14 @@
           const centerX = width / 2;
           const centerY = height / 2;
           const radius = Math.min(width, height) / 2;
-          const angle = ((strength / 10) - 0.5) * Math.PI * 2; // Use strength
+          const angle = (strength / 10 - 0.5) * Math.PI * 2;
           
           for (let y = 0; y < height; y++) {
             for (let x = 0; x < width; x++) {
               const dx = x - centerX;
               const dy = y - centerY;
               const distance = Math.sqrt(dx * dx + dy * dy);
+              const destIdx = (y * width + x) * 4;
               
               if (distance < radius) {
                 const percent = (radius - distance) / radius;
@@ -332,16 +347,22 @@
                 
                 if (srcX >= 0 && srcX < width && srcY >= 0 && srcY < height) {
                   const srcIdx = (Math.floor(srcY) * width + Math.floor(srcX)) * 4;
-                  const destIdx = (y * width + x) * 4;
                   
                   newData[destIdx] = data[srcIdx];
                   newData[destIdx + 1] = data[srcIdx + 1];
                   newData[destIdx + 2] = data[srcIdx + 2];
                   newData[destIdx + 3] = 255;
+                } else {
+                  // Keep original pixel if swirl goes out of bounds
+                  const origIdx = (y * width + x) * 4;
+                  newData[destIdx] = data[origIdx];
+                  newData[destIdx + 1] = data[origIdx + 1];
+                  newData[destIdx + 2] = data[origIdx + 2];
+                  newData[destIdx + 3] = 255;
                 }
               } else {
+                // Outside swirl radius - keep original pixel
                 const srcIdx = (y * width + x) * 4;
-                const destIdx = (y * width + x) * 4;
                 newData[destIdx] = data[srcIdx];
                 newData[destIdx + 1] = data[srcIdx + 1];
                 newData[destIdx + 2] = data[srcIdx + 2];
@@ -588,14 +609,21 @@
               
               const srcX = Math.floor(x + offsetX);
               const srcY = Math.floor(y + offsetY);
+              const destIdx = (y * width + x) * 4;
               
               if (srcX >= 0 && srcX < width && srcY >= 0 && srcY < height) {
                 const srcIdx = (srcY * width + srcX) * 4;
-                const destIdx = (y * width + x) * 4;
                 
                 newData[destIdx] = data[srcIdx];
                 newData[destIdx + 1] = data[srcIdx + 1];
                 newData[destIdx + 2] = data[srcIdx + 2];
+                newData[destIdx + 3] = 255;
+              } else {
+                // Keep original pixel when ripple goes out of bounds
+                const origIdx = (y * width + x) * 4;
+                newData[destIdx] = data[origIdx];
+                newData[destIdx + 1] = data[origIdx + 1];
+                newData[destIdx + 2] = data[origIdx + 2];
                 newData[destIdx + 3] = 255;
               }
             }
@@ -847,7 +875,10 @@
           const newImageData = ctx.createImageData(width, height);
           const newData = newImageData.data;
           
-          const waveCount = Math.floor((strength / 10) * 3) + 2; // Use strength
+          const waveCount = Math.floor((strength / 10) * 3) + 2;
+          
+          // Copy all original data first as fallback
+          newData.set(data);
           
           for (let y = 0; y < height; y++) {
             for (let x = 0; x < width; x++) {
@@ -855,7 +886,7 @@
               let offsetY = 0;
               
               for (let w = 0; w < waveCount; w++) {
-                const freq = (strength / 10) * 0.05 + 0.01;
+                const freq = Math.random() * 0.05 + 0.01;
                 const amp = (strength / 10) * 20 + 5;
                 offsetX += Math.sin((y + w * 100) * freq) * amp;
                 offsetY += Math.cos((x + w * 100) * freq) * amp;
@@ -873,6 +904,7 @@
                 newData[destIdx + 2] = data[srcIdx + 2];
                 newData[destIdx + 3] = 255;
               }
+              // Otherwise keeps original pixel from newData.set(data)
             }
           }
           
@@ -887,6 +919,9 @@
           
           const amplitude = (strength / 10) * 60 + 20; // 20-80px (increased from 5-20)
           const frequency = (strength / 10) * 0.02 + 0.005; // 0.005-0.025 (slower waves)
+          
+          // First, copy all original data as fallback
+          newData.set(data);
           
           for (let y = 0; y < height; y++) {
             for (let x = 0; x < width; x++) {
@@ -905,6 +940,7 @@
                 newData[destIdx + 2] = data[srcIdx + 2];
                 newData[destIdx + 3] = data[srcIdx + 3];
               }
+              // If out of bounds, newData already has the original pixel from newData.set(data)
             }
           }
           
@@ -1030,9 +1066,16 @@
           const currentState = canvas.toDataURL();
           setHistory(prev => [...prev, currentState]);
           
-          // Randomly choose a pattern type
-          const patternType = Math.floor(Math.random() * 4);
-          const patternNames = ['Pattern Tiling', 'Radial Duplication', 'Transform Repeat', 'Step-and-Repeat'];
+          // Choose a pattern type
+          const patternType = Math.floor(Math.random() * 6);
+          const patternNames = [
+            'Mirror Quad', 
+            'Diagonal Mirror', 
+            'Offset Grid', 
+            'Checkerboard Flip',
+            'Spiral Arrangement',
+            'Fractal Recursion'
+          ];
           
           const tempCanvas = document.createElement('canvas');
           const tempCtx = tempCanvas.getContext('2d');
@@ -1040,119 +1083,185 @@
           tempCanvas.height = height;
           tempCtx.drawImage(canvas, 0, 0);
           
-          // Clear canvas and create clipping region to prevent drawing outside bounds
-          ctx.clearRect(0, 0, width, height);
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(0, 0, width, height);
-          ctx.clip();
-          
-          // Use center 80% of image to avoid edge artifacts
-          const cropMargin = 0.1; // 10% margin on each side
-          const cropX = width * cropMargin;
-          const cropY = height * cropMargin;
-          const cropWidth = width * (1 - 2 * cropMargin);
-          const cropHeight = height * (1 - 2 * cropMargin);
+          // IMPORTANT: Keep original image as base for all patterns
+          // Patterns will blend on top
           
           switch(patternType) {
-            case 0: // Pattern Tiling - Grid duplication
+            case 0: // Mirror Quad - 4 mirrored quadrants
               {
-                const cols = Math.floor(Math.random() * 2) + 2; // 2-3 columns
-                const rows = Math.floor(Math.random() * 2) + 2; // 2-3 rows
-                const tileWidth = width / cols;
-                const tileHeight = height / rows;
+                const halfW = width / 2;
+                const halfH = height / 2;
                 
-                for (let row = 0; row < rows; row++) {
-                  for (let col = 0; col < cols; col++) {
-                    // Draw from center crop area
-                    ctx.drawImage(tempCanvas, 
-                      cropX, cropY, cropWidth, cropHeight, // Source: center crop
-                      col * tileWidth, row * tileHeight, tileWidth, tileHeight); // Destination: grid
-                  }
-                }
-              }
-              break;
-              
-            case 1: // Radial Duplication - Around center point
-              {
-                const copies = Math.floor(Math.random() * 4) + 6; // 6-9 copies
-                const centerX = width / 2;
-                const centerY = height / 2;
-                const scale = 0.4 + Math.random() * 0.2; // 0.4-0.6 scale
-                
+                // Draw original first (already on canvas)
+                // Now overlay with mirrored quadrants at reduced opacity
                 ctx.globalAlpha = 0.6;
-                for (let i = 0; i < copies; i++) {
-                  const angle = (Math.PI * 2 * i) / copies;
-                  ctx.save();
-                  ctx.translate(centerX, centerY);
-                  ctx.rotate(angle);
-                  ctx.scale(scale, scale);
-                  // Draw center crop only
-                  ctx.drawImage(tempCanvas, 
-                    cropX, cropY, cropWidth, cropHeight, // Source: center crop
-                    -cropWidth * scale / 2, -cropHeight * scale / 2, cropWidth * scale, cropHeight * scale);
-                  ctx.restore();
-                }
+                
+                // Top-left (original)
+                ctx.drawImage(tempCanvas, 0, 0, halfW, halfH, 0, 0, halfW, halfH);
+                
+                // Top-right (horizontal flip)
+                ctx.save();
+                ctx.scale(-1, 1);
+                ctx.drawImage(tempCanvas, 0, 0, halfW, halfH, -width, 0, halfW, halfH);
+                ctx.restore();
+                
+                // Bottom-left (vertical flip)
+                ctx.save();
+                ctx.scale(1, -1);
+                ctx.drawImage(tempCanvas, 0, 0, halfW, halfH, 0, -height, halfW, halfH);
+                ctx.restore();
+                
+                // Bottom-right (both flips)
+                ctx.save();
+                ctx.scale(-1, -1);
+                ctx.drawImage(tempCanvas, 0, 0, halfW, halfH, -width, -height, halfW, halfH);
+                ctx.restore();
+                
                 ctx.globalAlpha = 1.0;
               }
               break;
               
-            case 2: // Transform Repeat - Repeated scale/rotate/move
+            case 1: // Diagonal Mirror
               {
-                const steps = Math.floor(Math.random() * 3) + 4; // 4-6 steps
-                const scaleStep = 0.85 + Math.random() * 0.1; // 0.85-0.95 per step
-                const rotateStep = (Math.random() - 0.5) * 0.3; // Random rotation per step
-                const moveX = (Math.random() - 0.5) * width * 0.08;
-                const moveY = (Math.random() - 0.5) * height * 0.08;
+                // Original already on canvas
+                
+                // Mirror along diagonal with blending
+                ctx.globalAlpha = 0.5;
+                ctx.save();
+                ctx.translate(width / 2, height / 2);
+                ctx.rotate(Math.PI / 2);
+                ctx.scale(-1, 1);
+                ctx.drawImage(tempCanvas, -width / 2, -height / 2);
+                ctx.restore();
+                ctx.globalAlpha = 1.0;
+              }
+              break;
+              
+            case 2: // Offset Grid - datamosh style
+              {
+                // Original already on canvas as base
+                const gridSize = Math.floor(Math.random() * 3) + 3; // 3-5
+                const cellW = width / gridSize;
+                const cellH = height / gridSize;
+                const maxShift = Math.min(cellW, cellH) * 0.3; // Reduced shift to avoid gaps
                 
                 ctx.globalAlpha = 0.7;
-                for (let i = 0; i < steps; i++) {
-                  const currentScale = Math.pow(scaleStep, i);
-                  const currentRotation = rotateStep * i;
-                  const currentX = moveX * i;
-                  const currentY = moveY * i;
-                  
-                  ctx.save();
-                  ctx.translate(width / 2 + currentX, height / 2 + currentY);
-                  ctx.rotate(currentRotation);
-                  ctx.scale(currentScale, currentScale);
-                  // Draw center crop only
-                  ctx.drawImage(tempCanvas, 
-                    cropX, cropY, cropWidth, cropHeight, // Source: center crop
-                    -cropWidth / 2, -cropHeight / 2, cropWidth, cropHeight);
-                  ctx.restore();
+                
+                for (let row = 0; row < gridSize; row++) {
+                  for (let col = 0; col < gridSize; col++) {
+                    const srcX = col * cellW;
+                    const srcY = row * cellH;
+                    const offsetX = (Math.random() - 0.5) * maxShift;
+                    const offsetY = (Math.random() - 0.5) * maxShift;
+                    
+                    // Only shift some cells randomly
+                    if (Math.random() > 0.3) {
+                      ctx.drawImage(tempCanvas, 
+                        srcX, srcY, cellW, cellH,
+                        srcX + offsetX, srcY + offsetY, cellW, cellH);
+                    }
+                  }
                 }
+                
                 ctx.globalAlpha = 1.0;
               }
               break;
               
-            case 3: // Step-and-Repeat - Set intervals
+            case 3: // Checkerboard Flip
               {
-                const horizontal = Math.random() > 0.5;
-                const steps = Math.floor(Math.random() * 2) + 3; // 3-4 steps
-                const scale = 0.5 + Math.random() * 0.2; // 0.5-0.7 scale
-                const spacing = horizontal ? width / steps : height / steps;
+                // Original already on canvas
+                const gridSize = Math.floor(Math.random() * 2) + 4; // 4-5
+                const cellW = width / gridSize;
+                const cellH = height / gridSize;
                 
                 ctx.globalAlpha = 0.65;
-                for (let i = 0; i < steps; i++) {
-                  const x = horizontal ? spacing * i + spacing / 2 : width / 2;
-                  const y = horizontal ? height / 2 : spacing * i + spacing / 2;
+                
+                for (let row = 0; row < gridSize; row++) {
+                  for (let col = 0; col < gridSize; col++) {
+                    // Skip some cells to show original underneath
+                    if ((row + col) % 3 === 0) continue;
+                    
+                    const flipH = (row + col) % 2 === 0;
+                    const flipV = Math.random() > 0.5;
+                    
+                    ctx.save();
+                    ctx.translate(col * cellW + cellW / 2, row * cellH + cellH / 2);
+                    ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+                    ctx.drawImage(tempCanvas, 
+                      col * cellW, row * cellH, cellW, cellH,
+                      -cellW / 2, -cellH / 2, cellW, cellH);
+                    ctx.restore();
+                  }
+                }
+                
+                ctx.globalAlpha = 1.0;
+              }
+              break;
+              
+            case 4: // Spiral Arrangement
+              {
+                // Original already on canvas as base
+                const centerX = width / 2;
+                const centerY = height / 2;
+                const copies = 8 + Math.floor(Math.random() * 4); // 8-11
+                const maxRadius = Math.min(width, height) * 0.4;
+                
+                ctx.globalAlpha = 0.5;
+                
+                for (let i = 0; i < copies; i++) {
+                  const angle = (i / copies) * Math.PI * 4; // 2 full spirals
+                  const radius = (i / copies) * maxRadius;
+                  const x = centerX + Math.cos(angle) * radius;
+                  const y = centerY + Math.sin(angle) * radius;
+                  const scale = 0.25 + (i / copies) * 0.25; // 0.25 to 0.5
                   
                   ctx.save();
                   ctx.translate(x, y);
+                  ctx.rotate(angle);
                   ctx.scale(scale, scale);
-                  // Draw center crop only
-                  ctx.drawImage(tempCanvas, 
-                    cropX, cropY, cropWidth, cropHeight, // Source: center crop
-                    -cropWidth / 2, -cropHeight / 2, cropWidth, cropHeight);
+                  ctx.drawImage(tempCanvas, -width / 2, -height / 2);
                   ctx.restore();
                 }
+                
+                ctx.globalAlpha = 1.0;
+              }
+              break;
+              
+            case 5: // Fractal Recursion
+              {
+                // Original already on canvas
+                const levels = 3;
+                const scale = 0.5;
+                
+                function drawRecursive(level, x, y, w, h, angle, alpha) {
+                  if (level === 0) return;
+                  
+                  ctx.save();
+                  ctx.globalAlpha = alpha;
+                  ctx.translate(x, y);
+                  ctx.rotate(angle);
+                  ctx.drawImage(tempCanvas, -w / 2, -h / 2, w, h);
+                  ctx.restore();
+                  
+                  // Draw 4 smaller copies at corners
+                  const newW = w * scale;
+                  const newH = h * scale;
+                  const offset = w * 0.3;
+                  const newAlpha = alpha * 0.7; // Fade out as we go deeper
+                  
+                  drawRecursive(level - 1, x - offset, y - offset, newW, newH, angle + 0.1, newAlpha);
+                  drawRecursive(level - 1, x + offset, y - offset, newW, newH, angle - 0.1, newAlpha);
+                  drawRecursive(level - 1, x - offset, y + offset, newW, newH, angle - 0.1, newAlpha);
+                  drawRecursive(level - 1, x + offset, y + offset, newW, newH, angle + 0.1, newAlpha);
+                }
+                
+                // Draw recursion on top of original
+                drawRecursive(levels, width / 2, height / 2, width * 0.8, height * 0.8, 0, 0.6);
                 ctx.globalAlpha = 1.0;
               }
               break;
           }
           
-          ctx.restore(); // Remove clipping
           setLastEffects([patternNames[patternType]]);
           setNukeCount(prev => prev + 1);
         };
@@ -1219,8 +1328,6 @@
             { fn: () => applySliceShift(ctx, width, height, strength), name: 'Slice Shift' },
             { fn: () => applyGlass(ctx, width, height, strength), name: 'Glass' },
             { fn: () => applyBulge(ctx, width, height, strength), name: 'Bulge' },
-            { fn: () => applyPinch(ctx, width, height, strength), name: 'Pinch' },
-            { fn: () => applyCrystallize(ctx, width, height, strength), name: 'Crystallize' },
             { fn: () => applyEmboss(ctx, width, height, strength), name: 'Emboss' },
             { fn: () => {
               const imageData = ctx.getImageData(0, 0, width, height);
@@ -1325,21 +1432,6 @@
                     />
                   </div>
 
-                  {lastEffects.length > 0 && (
-                    <div className="mb-6 text-center">
-                      <div className="inline-block bg-gradient-to-r from-cyan-500 to-blue-500 rounded-lg px-6 py-3 shadow-lg">
-                        <p className="text-white font-bold text-lg mb-1">⚡ Last Applied Effects:</p>
-                        <div className="flex flex-wrap gap-2 justify-center">
-                          {lastEffects.map((effect, index) => (
-                            <span key={index} className="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full text-white text-sm font-semibold">
-                              {effect}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
                   <div className="flex gap-4 flex-wrap justify-center">
                     <button
                       onClick={nukeImage}
@@ -1349,6 +1441,18 @@
                       }}
                     >
                       💣 NUKE THIS 💣
+                    </button>
+
+                    <button
+                      onClick={undoNuke}
+                      disabled={history.length === 0}
+                      className={`px-8 py-4 text-white text-xl font-bold rounded-lg transform hover:scale-105 transition-all shadow-lg ${
+                        history.length === 0 
+                          ? 'bg-gray-600 cursor-not-allowed opacity-50' 
+                          : 'bg-gradient-to-r from-yellow-600 to-amber-600 hover:from-yellow-500 hover:to-amber-500'
+                      }`}
+                    >
+                      ↩️ Undo
                     </button>
 
                     <button
@@ -1366,18 +1470,6 @@
                     </button>
 
                     <button
-                      onClick={undoNuke}
-                      disabled={history.length === 0}
-                      className={`px-8 py-4 text-white text-xl font-bold rounded-lg transform hover:scale-105 transition-all shadow-lg ${
-                        history.length === 0 
-                          ? 'bg-gray-600 cursor-not-allowed opacity-50' 
-                          : 'bg-gradient-to-r from-yellow-600 to-amber-600 hover:from-yellow-500 hover:to-amber-500'
-                      }`}
-                    >
-                      ↩️ Undo
-                    </button>
-
-                    <button
                       onClick={exportImage}
                       className="px-8 py-4 bg-gradient-to-r from-green-600 to-teal-600 text-white text-xl font-bold rounded-lg hover:from-green-500 hover:to-teal-500 transform hover:scale-105 transition-all shadow-lg"
                     >
@@ -1392,6 +1484,20 @@
                     </button>
                   </div>
 
+                  {lastEffects.length > 0 && (
+                    <div className="mt-6 text-center">
+                      <div className="inline-block bg-gradient-to-r from-cyan-500 to-blue-500 rounded-lg px-6 py-3 shadow-lg">
+                        <p className="text-white font-bold text-lg mb-1">⚡ Last Applied Effects:</p>
+                        <div className="flex flex-wrap gap-2 justify-center">
+                          {lastEffects.map((effect, index) => (
+                            <span key={index} className="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full text-white text-sm font-semibold">
+                              {effect}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   <div className="mt-6 text-center text-pink-200">
                     <p className="text-sm">Right-click the image to copy • Keep nuking for maximum destruction</p>
                   </div>
