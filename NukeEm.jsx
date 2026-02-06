@@ -1,5 +1,3 @@
-import React, { useState, useRef, useEffect } from 'react';
-
 const NukeMemes = () => {
   const [currentImage, setCurrentImage] = useState(null);
   const [nukeCount, setNukeCount] = useState(0);
