@@ -11,10 +11,24 @@
 </head>
 <body>
   <div id="root"></div>
-  <script type="text/babel" src="NukeEm.jsx"></script>
+  
   <script type="text/babel">
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<NukeMemes />);
+    // Paste your entire NukeEm.jsx code here (without the export line)
+    // OR load it like this:
+    
+    fetch('NukeEm.jsx')
+      .then(response => response.text())
+      .then(code => {
+        // Remove export statement
+        const cleanCode = code.replace(/export\s+default\s+\w+;?\s*$/gm, '');
+        
+        // Execute the code
+        eval(Babel.transform(cleanCode, { presets: ['react'] }).code);
+        
+        // Render the component
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(React.createElement(NukeMemes));
+      });
   </script>
 </body>
 </html>
