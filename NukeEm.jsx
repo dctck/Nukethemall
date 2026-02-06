@@ -1386,5 +1386,3 @@ const NukeMemes = () => {
     </div>
   );
 };
-
-export default NukeMemes;
