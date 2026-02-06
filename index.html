@@ -8,6 +8,21 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes slide-in {
+      from {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+    .animate-slide-in {
+      animation: slide-in 0.3s ease-out;
+    }
+  </style>
 </head>
 <body>
   <div id="root"></div>
@@ -26,6 +41,8 @@
       const [nukeCount, setNukeCount] = useState(0);
       const [history, setHistory] = useState([]);
       const [lastEffects, setLastEffects] = useState([]);
+      const [isProcessing, setIsProcessing] = useState(false);
+      const [toast, setToast] = useState({ show: false, message: '', type: '' });
       const canvasRef = useRef(null);
       const fileInputRef = useRef(null);
 
@@ -39,6 +56,54 @@
           }
         }, [currentImage]);
 
+        const showToast = (message, type = 'success') => {
+          setToast({ show: true, message, type });
+          setTimeout(() => {
+            setToast({ show: false, message: '', type: '' });
+          }, 2000); // Auto-dismiss after 2 seconds
+        };
+
+        // Keyboard shortcuts
+        useEffect(() => {
+          const handleKeyPress = (e) => {
+            // Don't trigger if user is typing in an input field
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            
+            const key = e.key.toLowerCase();
+            
+            switch(key) {
+              case 'd':
+                if (currentImage) nukeImage();
+                break;
+              case 'a':
+                if (history.length > 0) undoNuke();
+                break;
+              case 's':
+                e.preventDefault(); // Prevent browser save dialog
+                if (currentImage) exportImage();
+                break;
+              case 'e':
+                if (currentImage) applyPattern();
+                break;
+              case 'q':
+                if (currentImage) addOverlay();
+                break;
+              case 'n':
+                resetImage();
+                break;
+              default:
+                break;
+            }
+          };
+          
+          window.addEventListener('keydown', handleKeyPress);
+          
+          // Cleanup
+          return () => {
+            window.removeEventListener('keydown', handleKeyPress);
+          };
+        }, [currentImage, history]); // Re-bind when these change
+
         const loadImage = (file) => {
           const reader = new FileReader();
           reader.onload = (e) => {
@@ -48,7 +113,7 @@
               setNukeCount(0);
               setHistory([]);
               setLastEffects([]);
-              drawImageToCanvas(img);
+              showToast(`📸 Image loaded: ${file.name}`, 'success');
             };
             img.src = e.target.result;
           };
@@ -1022,42 +1087,49 @@
         const addOverlay = () => {
           if (!currentImage) return;
           
-          const canvas = canvasRef.current;
-          const ctx = canvas.getContext('2d');
-          const width = canvas.width;
-          const height = canvas.height;
+          setIsProcessing(true);
           
-          const currentState = canvas.toDataURL();
-          setHistory(prev => [...prev, currentState]);
-          
-          const scaledWidth = width * 0.7;
-          const scaledHeight = height * 0.7;
-          
-          const x = Math.random() * (width - scaledWidth);
-          const y = Math.random() * (height - scaledHeight);
-          
-          const rotation = (Math.random() - 0.5) * Math.PI;
-          
-          const tempCanvas = document.createElement('canvas');
-          const tempCtx = tempCanvas.getContext('2d');
-          tempCanvas.width = width;
-          tempCanvas.height = height;
-          tempCtx.drawImage(canvas, 0, 0);
-          
-          ctx.save();
-          ctx.translate(x + scaledWidth / 2, y + scaledHeight / 2);
-          ctx.rotate(rotation);
-          ctx.globalAlpha = 0.5;
-          ctx.drawImage(tempCanvas, -scaledWidth / 2, -scaledHeight / 2, scaledWidth, scaledHeight);
-          ctx.restore();
-          
-          setLastEffects(['Add Overlay (70% size, 50% opacity)']);
-          setNukeCount(prev => prev + 1);
+          setTimeout(() => {
+            const canvas = canvasRef.current;
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            
+            const currentState = canvas.toDataURL();
+            setHistory(prev => [...prev, currentState]);
+            
+            const scaledWidth = width * 0.7;
+            const scaledHeight = height * 0.7;
+            
+            const x = Math.random() * (width - scaledWidth);
+            const y = Math.random() * (height - scaledHeight);
+            
+            const rotation = (Math.random() - 0.5) * Math.PI;
+            
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = width;
+            tempCanvas.height = height;
+            tempCtx.drawImage(canvas, 0, 0);
+            
+            ctx.save();
+            ctx.translate(x + scaledWidth / 2, y + scaledHeight / 2);
+            ctx.rotate(rotation);
+            ctx.globalAlpha = 0.5;
+            ctx.drawImage(tempCanvas, -scaledWidth / 2, -scaledHeight / 2, scaledWidth, scaledHeight);
+            ctx.restore();
+            
+            setLastEffects(['Add Overlay (70% size, 50% opacity)']);
+            setNukeCount(prev => prev + 1);
+            setIsProcessing(false);
+          }, 100);
         };
 
         const applyPattern = () => {
           if (!currentImage) return;
           
+          setIsProcessing(true);
+
           const canvas = canvasRef.current;
           const ctx = canvas.getContext('2d');
           const width = canvas.width;
@@ -1264,114 +1336,124 @@
           
           setLastEffects([patternNames[patternType]]);
           setNukeCount(prev => prev + 1);
+          setIsProcessing(false);
         };
 
         const nukeImage = () => {
           if (!currentImage) return;
           
-          const canvas = canvasRef.current;
-          const ctx = canvas.getContext('2d');
-          const width = canvas.width;
-          const height = canvas.height;
+          setIsProcessing(true);
           
-          const currentState = canvas.toDataURL();
-          setHistory(prev => [...prev, currentState]);
-          
-          const strength = Math.floor(Math.random() * 10) + 1;
-          
-          const numEffects = Math.floor(Math.random() * 2) + 1;
-          const allEffects = [
-            { fn: () => applyRGBShift(ctx, width, height, strength), name: 'RGB Shift' },
-            { fn: () => {
-              const imageData = ctx.getImageData(0, 0, width, height);
-              applyGlitchEffect(imageData, strength);
-              ctx.putImageData(imageData, 0, 0);
-            }, name: 'Glitch Effect' },
-            { fn: () => {
-              const imageData = ctx.getImageData(0, 0, width, height);
-              applyNoise(imageData, strength);
-              ctx.putImageData(imageData, 0, 0);
-            }, name: 'Noise' },
-            { fn: () => {
-              const imageData = ctx.getImageData(0, 0, width, height);
-              applyColorDistortion(imageData, strength);
-              ctx.putImageData(imageData, 0, 0);
-            }, name: 'Color Distortion' },
-            { fn: () => {
-              const imageData = ctx.getImageData(0, 0, width, height);
-              applyPosterize(imageData, strength);
-              ctx.putImageData(imageData, 0, 0);
-            }, name: 'Posterize' },
-            { fn: () => applyEdgeDetection(ctx, width, height, strength), name: 'Edge Detection' },
-            { fn: () => applyKaleidoscope(ctx, width, height, strength), name: 'Kaleidoscope' },
-            { fn: () => applyWaveDistortion(ctx, width, height, strength), name: 'Wave Distortion' },
-            { fn: () => {
-              const imageData = ctx.getImageData(0, 0, width, height);
-              applyDeepFry(imageData, strength);
-              ctx.putImageData(imageData, 0, 0);
-            }, name: 'Deep Fry' },
-            { fn: () => {
-              const imageData = ctx.getImageData(0, 0, width, height);
-              applyChannelSwap(imageData, strength);
-              ctx.putImageData(imageData, 0, 0);
-            }, name: 'Channel Swap' },
-            { fn: () => applyBlockGlitch(ctx, width, height, strength), name: 'Block Glitch' },
-            { fn: () => applyChromatic(ctx, width, height, strength), name: 'Chromatic Aberration' },
-            { fn: () => applyRadialBlur(ctx, width, height, strength), name: 'Radial Blur' },
-            { fn: () => applySwirl(ctx, width, height, strength), name: 'Swirl' },
-            { fn: () => applyBurn(ctx, width, height, strength), name: 'Burn' },
-            { fn: () => applyExplosion(ctx, width, height, strength), name: 'Explosion' },
-            { fn: () => applyDisplacement(ctx, width, height, strength), name: 'Displacement' },
-            { fn: () => applyParticles(ctx, width, height, strength), name: 'Particles' },
-            { fn: () => applyLiquify(ctx, width, height, strength), name: 'Liquify' },
-            { fn: () => applyChunkyBlocks(ctx, width, height, strength), name: 'Chunky Blocks' },
-            { fn: () => applySliceShift(ctx, width, height, strength), name: 'Slice Shift' },
-            { fn: () => applyGlass(ctx, width, height, strength), name: 'Glass' },
-            { fn: () => applyBulge(ctx, width, height, strength), name: 'Bulge' },
-            { fn: () => applyEmboss(ctx, width, height, strength), name: 'Emboss' },
-            { fn: () => {
-              const imageData = ctx.getImageData(0, 0, width, height);
-              applySolarize(imageData, strength);
-              ctx.putImageData(imageData, 0, 0);
-            }, name: 'Solarize' },
-            { fn: () => applyRipple(ctx, width, height, strength), name: 'Ripple' },
-          ];
-          
-          const shuffled = allEffects.sort(() => Math.random() - 0.5);
-          const selectedEffects = shuffled.slice(0, numEffects);
-          
-          // Apply selected effects
-          selectedEffects.forEach(effect => effect.fn());
-          
-          // Store effect names with strength
-          const effectNames = selectedEffects.map(e => `${e.name} (${strength})`);
-          
-          // Rarely add JPEG corruption
-          if (Math.random() > 0.85) {
-            applyJPEGCorruption(ctx, width, height);
-            effectNames.push('JPEG Corruption');
-          }
-          
-          setLastEffects(effectNames);
-          setNukeCount(prev => prev + 1);
+          // Small delay to show loading state
+          setTimeout(() => {
+            const canvas = canvasRef.current;
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            
+            const currentState = canvas.toDataURL();
+            setHistory(prev => [...prev, currentState]);
+            
+            const strength = Math.floor(Math.random() * 10) + 1;
+            
+            const numEffects = Math.floor(Math.random() * 2) + 1;
+            const allEffects = [
+              { fn: () => applyRGBShift(ctx, width, height, strength), name: 'RGB Shift' },
+              { fn: () => {
+                const imageData = ctx.getImageData(0, 0, width, height);
+                applyGlitchEffect(imageData, strength);
+                ctx.putImageData(imageData, 0, 0);
+              }, name: 'Glitch Effect' },
+              { fn: () => {
+                const imageData = ctx.getImageData(0, 0, width, height);
+                applyNoise(imageData, strength);
+                ctx.putImageData(imageData, 0, 0);
+              }, name: 'Noise' },
+              { fn: () => {
+                const imageData = ctx.getImageData(0, 0, width, height);
+                applyColorDistortion(imageData, strength);
+                ctx.putImageData(imageData, 0, 0);
+              }, name: 'Color Distortion' },
+              { fn: () => {
+                const imageData = ctx.getImageData(0, 0, width, height);
+                applyPosterize(imageData, strength);
+                ctx.putImageData(imageData, 0, 0);
+              }, name: 'Posterize' },
+              { fn: () => applyEdgeDetection(ctx, width, height, strength), name: 'Edge Detection' },
+              { fn: () => applyKaleidoscope(ctx, width, height, strength), name: 'Kaleidoscope' },
+              { fn: () => applyWaveDistortion(ctx, width, height, strength), name: 'Wave Distortion' },
+              { fn: () => {
+                const imageData = ctx.getImageData(0, 0, width, height);
+                applyDeepFry(imageData, strength);
+                ctx.putImageData(imageData, 0, 0);
+              }, name: 'Deep Fry' },
+              { fn: () => {
+                const imageData = ctx.getImageData(0, 0, width, height);
+                applyChannelSwap(imageData, strength);
+                ctx.putImageData(imageData, 0, 0);
+              }, name: 'Channel Swap' },
+              { fn: () => applyBlockGlitch(ctx, width, height, strength), name: 'Block Glitch' },
+              { fn: () => applyChromatic(ctx, width, height, strength), name: 'Chromatic Aberration' },
+              { fn: () => applyRadialBlur(ctx, width, height, strength), name: 'Radial Blur' },
+              { fn: () => applySwirl(ctx, width, height, strength), name: 'Swirl' },
+              { fn: () => applyBurn(ctx, width, height, strength), name: 'Burn' },
+              { fn: () => applyExplosion(ctx, width, height, strength), name: 'Explosion' },
+              { fn: () => applyDisplacement(ctx, width, height, strength), name: 'Displacement' },
+              { fn: () => applyParticles(ctx, width, height, strength), name: 'Particles' },
+              { fn: () => applyLiquify(ctx, width, height, strength), name: 'Liquify' },
+              { fn: () => applyChunkyBlocks(ctx, width, height, strength), name: 'Chunky Blocks' },
+              { fn: () => applySliceShift(ctx, width, height, strength), name: 'Slice Shift' },
+              { fn: () => applyGlass(ctx, width, height, strength), name: 'Glass' },
+              { fn: () => applyBulge(ctx, width, height, strength), name: 'Bulge' },
+              { fn: () => applyEmboss(ctx, width, height, strength), name: 'Emboss' },
+              { fn: () => {
+                const imageData = ctx.getImageData(0, 0, width, height);
+                applySolarize(imageData, strength);
+                ctx.putImageData(imageData, 0, 0);
+              }, name: 'Solarize' },
+              { fn: () => applyRipple(ctx, width, height, strength), name: 'Ripple' },
+            ];
+            
+            const shuffled = allEffects.sort(() => Math.random() - 0.5);
+            const selectedEffects = shuffled.slice(0, numEffects);
+            
+            selectedEffects.forEach(effect => effect.fn());
+            
+            const effectNames = selectedEffects.map(e => `${e.name} (${strength})`);
+            
+            if (Math.random() > 0.85) {
+              applyJPEGCorruption(ctx, width, height);
+              effectNames.push('JPEG Corruption');
+            }
+            
+            setLastEffects(effectNames);
+            setNukeCount(prev => prev + 1);
+            setIsProcessing(false);
+          }, 100);
         };
 
         const undoNuke = () => {
           if (history.length === 0) return;
           
-          const canvas = canvasRef.current;
-          const ctx = canvas.getContext('2d');
+          setIsProcessing(true);
           
-          const previousState = history[history.length - 1];
-          
-          const img = new Image();
-          img.onload = () => {
-            ctx.drawImage(img, 0, 0);
-            setHistory(prev => prev.slice(0, -1));
-            setNukeCount(prev => Math.max(0, prev - 1));
-            setLastEffects([]);
-          };
-          img.src = previousState;
+          setTimeout(() => {
+            const canvas = canvasRef.current;
+            const ctx = canvas.getContext('2d');
+            
+            const previousState = history[history.length - 1];
+            
+            const img = new Image();
+            img.onload = () => {
+              ctx.drawImage(img, 0, 0);
+              setHistory(prev => prev.slice(0, -1));
+              setNukeCount(prev => Math.max(0, prev - 1));
+              setLastEffects([]);
+              setIsProcessing(false);
+              showToast('⏪ Undone!', 'info');
+            };
+            img.src = previousState;
+          }, 50);
         };
 
         const exportImage = () => {
@@ -1382,6 +1464,8 @@
           link.download = `nuked-meme-${nukeCount}.png`;
           link.href = canvas.toDataURL('image/png');
           link.click();
+
+          showToast(`💾 Exported: nuked-meme-${nukeCount}.png`, 'success');
         };
 
         const resetImage = () => {
@@ -1424,13 +1508,35 @@
                 </div>
               ) : (
                 <>
-                  <div className="bg-black rounded-lg p-4 mb-6 shadow-2xl">
+                  <div className="bg-black rounded-lg p-4 mb-6 shadow-2xl relative">
                     <canvas
                       ref={canvasRef}
                       className="max-w-full mx-auto"
                       style={{ imageRendering: 'pixelated' }}
                     />
+                    {isProcessing && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg">
+                        <div className="text-center">
+                          <div className="inline-block animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-pink-500 mb-3"></div>
+                          <p className="text-white text-xl font-bold animate-pulse">NUKING...</p>
+                        </div>
+                      </div>
+                    )}
+
                   </div>
+
+                  {toast.show && (
+                    <div className="fixed top-8 right-8 z-50 animate-slide-in">
+                      <div className={`rounded-lg px-6 py-4 shadow-2xl flex items-center gap-3 ${
+                        toast.type === 'success' ? 'bg-gradient-to-r from-green-500 to-emerald-500' :
+                        toast.type === 'info' ? 'bg-gradient-to-r from-blue-500 to-cyan-500' :
+                        'bg-gradient-to-r from-orange-500 to-yellow-500'
+                      }`}>
+                        <span className="text-white text-lg font-bold">{toast.message}</span>
+                      </div>
+                    </div>
+                  )}
+
 
                   <div className="flex gap-4 flex-wrap justify-center">
                     <button
@@ -1440,7 +1546,7 @@
                         textShadow: '2px 2px 4px rgba(0,0,0,0.8)'
                       }}
                     >
-                      💣 NUKE THIS 💣
+                      💣 NUKE (D) 💣
                     </button>
 
                     <button
@@ -1452,35 +1558,35 @@
                           : 'bg-gradient-to-r from-yellow-600 to-amber-600 hover:from-yellow-500 hover:to-amber-500'
                       }`}
                     >
-                      ↩️ Undo
+                      ↩️ Undo  (A)
                     </button>
 
                     <button
                       onClick={addOverlay}
                       className="px-8 py-4 bg-gradient-to-r from-purple-600 to-pink-600 text-white text-xl font-bold rounded-lg hover:from-purple-500 hover:to-pink-500 transform hover:scale-105 transition-all shadow-lg"
                     >
-                      🎭 Add Overlay
+                      🎭 Overlay  (Q)
                     </button>
 
                     <button
                       onClick={applyPattern}
                       className="px-8 py-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-xl font-bold rounded-lg hover:from-indigo-500 hover:to-purple-500 transform hover:scale-105 transition-all shadow-lg"
                     >
-                      🔲 Pattern
+                      🔲 Pattern  (E)
                     </button>
 
                     <button
                       onClick={exportImage}
                       className="px-8 py-4 bg-gradient-to-r from-green-600 to-teal-600 text-white text-xl font-bold rounded-lg hover:from-green-500 hover:to-teal-500 transform hover:scale-105 transition-all shadow-lg"
                     >
-                      💾 Export PNG
+                      💾 Export (S)
                     </button>
 
                     <button
                       onClick={resetImage}
                       className="px-8 py-4 bg-gradient-to-r from-blue-600 to-cyan-600 text-white text-xl font-bold rounded-lg hover:from-blue-500 hover:to-cyan-500 transform hover:scale-105 transition-all shadow-lg"
                     >
-                      🔄 New Image
+                      🔄 New Image (N)
                     </button>
                   </div>
 
@@ -1505,7 +1611,9 @@
               )}
 
               <div className="mt-12 text-center text-pink-300 text-sm">
-                <p>Inspired by r/NukedMemes • Crank everything to 11 🎸</p>
+                <p className="mt-2 text-pink-400">
+                  ⌨️ Keyboard: <span className="font-bold">D</span>=Nuke • <span className="font-bold">A</span>=Undo • <span className="font-bold">Q</span>=Overlay • <span className="font-bold">E</span>=Pattern • <span className="font-bold">S</span>=Export • <span className="font-bold">N</span>=New
+                </p>
               </div>
             </div>
           </div>
