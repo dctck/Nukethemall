@@ -1096,7 +1096,11 @@
             const height = canvas.height;
             
             const currentState = canvas.toDataURL();
-            setHistory(prev => [...prev, currentState]);
+            // Keep only last 2 states for undo
+            setHistory(prev => {
+              const newHistory = [...prev, currentState];
+              return newHistory.slice(-2); // Keep only last 2
+            });
             
             const scaledWidth = width * 0.7;
             const scaledHeight = height * 0.7;
@@ -1136,7 +1140,11 @@
           const height = canvas.height;
           
           const currentState = canvas.toDataURL();
-          setHistory(prev => [...prev, currentState]);
+          // Keep only last 2 states for undo
+          setHistory(prev => {
+            const newHistory = [...prev, currentState];
+            return newHistory.slice(-2); // Keep only last 2
+          });
           
           // Choose a pattern type
           const patternType = Math.floor(Math.random() * 6);
@@ -1352,7 +1360,11 @@
             const height = canvas.height;
             
             const currentState = canvas.toDataURL();
-            setHistory(prev => [...prev, currentState]);
+            // Keep only last 2 states for undo
+            setHistory(prev => {
+              const newHistory = [...prev, currentState];
+              return newHistory.slice(-2); // Keep only last 2
+            });
             
             const strength = Math.floor(Math.random() * 10) + 1;
             
@@ -1591,13 +1603,13 @@
                     <button
                       onClick={undoNuke}
                       disabled={history.length === 0}
-                      className={`px-8 py-4 text-white text-xl font-bold rounded-lg transform hover:scale-105 transition-all shadow-lg ${
-                        history.length === 0 
-                          ? 'bg-gray-600 cursor-not-allowed opacity-50' 
-                          : 'bg-gradient-to-r from-yellow-600 to-amber-600 hover:from-yellow-500 hover:to-amber-500'
+                        className={`px-8 py-4 text-white text-xl font-bold rounded-lg transform hover:scale-105 transition-all shadow-lg ${
+                          history.length === 0 
+                            ? 'bg-gray-600 cursor-not-allowed opacity-50' 
+                            : 'bg-gradient-to-r from-yellow-600 to-amber-600 hover:from-yellow-500 hover:to-amber-500'
                       }`}
                     >
-                      ↩️ Undo  (A)
+                      ↩️ Undo (A) {history.length > 0 && `[${history.length}]`}
                     </button>
 
                     <button
