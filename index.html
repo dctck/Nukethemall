@@ -1456,16 +1456,55 @@
           }, 50);
         };
 
-        const exportImage = () => {
+        const exportImage = async () => {
           if (!canvasRef.current) return;
           
           const canvas = canvasRef.current;
+          const filename = `nuked-meme-${nukeCount}.png`;
+          
+          // Check if we're on mobile and Web Share API is available
+          const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+          const canShare = navigator.share && navigator.canShare;
+          
+          if (isMobile && canShare) {
+            try {
+              // Convert canvas to blob
+              canvas.toBlob(async (blob) => {
+                const file = new File([blob], filename, { type: 'image/png' });
+                
+                // Check if we can share this file
+                if (navigator.canShare({ files: [file] })) {
+                  await navigator.share({
+                    files: [file],
+                    title: 'Nuked Meme',
+                    text: 'Check out my nuked meme!'
+                  });
+                  showToast('📱 Image shared!', 'success');
+                } else {
+                  // Fallback to download if sharing isn't supported
+                  downloadImage(canvas, filename);
+                }
+              }, 'image/png');
+            } catch (error) {
+              // User cancelled or error occurred
+              if (error.name !== 'AbortError') {
+                console.error('Share failed:', error);
+                downloadImage(canvas, filename);
+              }
+            }
+          } else {
+            // Desktop or no share support - use download
+            downloadImage(canvas, filename);
+          }
+        };
+
+        // Helper function for traditional download
+        const downloadImage = (canvas, filename) => {
           const link = document.createElement('a');
-          link.download = `nuked-meme-${nukeCount}.png`;
+          link.download = filename;
           link.href = canvas.toDataURL('image/png');
           link.click();
-
-          showToast(`💾 Exported: nuked-meme-${nukeCount}.png`, 'success');
+          showToast(`💾 Exported: ${filename}`, 'success');
         };
 
         const resetImage = () => {
