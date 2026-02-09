@@ -30,9 +30,15 @@
   <script type="text/babel">
     const { useState, useRef, useEffect } = React;
 
-    // PASTE ALL YOUR NukeEm.jsx CODE BELOW THIS LINE
-    // (Starting from "const NukeMemes = () => {" all the way to the closing "}")
-    // DO NOT include: import statements or export statements
+    const getContext = (canvas) => {
+      const ctx = canvas.getContext('2d');
+      // Disable smoothing for sharp pixels
+      ctx.imageSmoothingEnabled = false;
+      ctx.mozImageSmoothingEnabled = false;
+      ctx.webkitImageSmoothingEnabled = false;
+      ctx.msImageSmoothingEnabled = false;
+      return ctx;
+    };
     
 
 
@@ -125,7 +131,12 @@
           const ctx = canvas.getContext('2d');
           canvas.width = img.width;
           canvas.height = img.height;
+          ctx.imageSmoothingEnabled = false;
+          ctx.mozImageSmoothingEnabled = false;
+          ctx.webkitImageSmoothingEnabled = false;
+          ctx.msImageSmoothingEnabled = false;
           ctx.drawImage(img, 0, 0);
+
         };
 
         const applyGlitchEffect = (imageData, strength) => {
@@ -1091,7 +1102,7 @@
           
           setTimeout(() => {
             const canvas = canvasRef.current;
-            const ctx = canvas.getContext('2d');
+            const ctx = getContext(canvas); // Use helper
             const width = canvas.width;
             const height = canvas.height;
             
@@ -1135,7 +1146,7 @@
           setIsProcessing(true);
 
           const canvas = canvasRef.current;
-          const ctx = canvas.getContext('2d');
+          const ctx = getContext(canvas); // Use helper
           const width = canvas.width;
           const height = canvas.height;
           
@@ -1355,7 +1366,7 @@
           // Small delay to show loading state
           setTimeout(() => {
             const canvas = canvasRef.current;
-            const ctx = canvas.getContext('2d');
+            const ctx = getContext(canvas);
             const width = canvas.width;
             const height = canvas.height;
             
@@ -1563,7 +1574,9 @@
                     <canvas
                       ref={canvasRef}
                       className="max-w-full mx-auto"
-                      style={{ imageRendering: 'pixelated' }}
+                      style={{ imageRendering: 'pixelated', 
+                        imageRendering: '-moz-crisp-edges',
+                        imageRendering: 'crisp-edges' }}
                     />
                     {isProcessing && (
                       <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg">
