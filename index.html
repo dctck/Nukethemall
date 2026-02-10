@@ -8,6 +8,7 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
   <style>
     @keyframes slide-in {
       from {
@@ -51,14 +52,17 @@
       const [toast, setToast] = useState({ show: false, message: '', type: '' });
       const canvasRef = useRef(null);
       const fileInputRef = useRef(null);
+      const [showPasswordModal, setShowPasswordModal] = useState(false);
+      const [showRestoreModal, setShowRestoreModal] = useState(false);
+      const [password, setPassword] = useState('');
+      const [exportMode, setExportMode] = useState('normal'); // 'normal' or 'protected'
+      const [hasProtectedData, setHasProtectedData] = useState(false);
+      const [showPassword, setShowPassword] = useState(false);
+      const [lastTypedIndex, setLastTypedIndex] = useState(-1);
 
         useEffect(() => {
           if (currentImage && canvasRef.current) {
-            const canvas = canvasRef.current;
-            const ctx = canvas.getContext('2d');
-            canvas.width = currentImage.width;
-            canvas.height = currentImage.height;
-            ctx.drawImage(currentImage, 0, 0);
+            drawImageToCanvas(currentImage);
           }
         }, [currentImage]);
 
@@ -86,13 +90,14 @@
                 break;
               case 's':
                 e.preventDefault(); // Prevent browser save dialog
-                if (currentImage) exportImage();
+                if (currentImage) exportImage(false);
+                break;
+              case 'g':
+                e.preventDefault(); // Prevent browser find
+                if (currentImage) exportImage(true);
                 break;
               case 'e':
                 if (currentImage) applyPattern();
-                break;
-              case 'q':
-                if (currentImage) addOverlay();
                 break;
               case 'n':
                 resetImage();
@@ -108,7 +113,7 @@
           return () => {
             window.removeEventListener('keydown', handleKeyPress);
           };
-        }, [currentImage, history]); // Re-bind when these change
+        }, [currentImage, history, password]); // Re-bind when these change
 
         const loadImage = (file) => {
           const reader = new FileReader();
@@ -119,6 +124,53 @@
               setNukeCount(0);
               setHistory([]);
               setLastEffects([]);
+              
+              // Draw after state update
+              setTimeout(() => {
+                if (canvasRef.current) {
+                  drawImageToCanvas(img);
+                }
+              }, 0);
+              
+              // Check if image has protected data
+              setTimeout(() => {
+                try {
+                  const canvas = canvasRef.current;
+                  const tempCanvas = document.createElement('canvas');
+                  tempCanvas.width = canvas.width;
+                  tempCanvas.height = canvas.height;
+                  const tempCtx = tempCanvas.getContext('2d');
+                  tempCtx.drawImage(canvas, 0, 0);
+                  
+                  // Try to read length header
+                  const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+                  const pixels = imageData.data;
+                  
+                  let binaryLength = '';
+                  for (let i = 0; i < 80; i++) {
+                    const pixelIndex = Math.floor(i / 3) * 4;
+                    const channel = i % 3;
+                    binaryLength += (pixels[pixelIndex + channel] & 1).toString();
+                  }
+                  
+                  let lengthStr = '';
+                  for (let i = 0; i < binaryLength.length; i += 8) {
+                    lengthStr += String.fromCharCode(parseInt(binaryLength.substr(i, 8), 2));
+                  }
+                  const dataLength = parseInt(lengthStr);
+                  
+                  // If valid length found, image has protected data
+                  if (!isNaN(dataLength) && dataLength > 0 && dataLength < 10000000) {
+                    setHasProtectedData(true);
+                    showToast('🔐 Protected image detected!', 'info');
+                  } else {
+                    setHasProtectedData(false);
+                  }
+                } catch (e) {
+                  setHasProtectedData(false);
+                }
+              }, 100);
+              
               showToast(`📸 Image loaded: ${file.name}`, 'success');
             };
             img.src = e.target.result;
@@ -128,15 +180,22 @@
 
         const drawImageToCanvas = (img) => {
           const canvas = canvasRef.current;
+          if (!canvas) {
+            console.error('Canvas not ready');
+            return;
+          }
+          
           const ctx = canvas.getContext('2d');
           canvas.width = img.width;
           canvas.height = img.height;
+          
+          // DISABLE IMAGE SMOOTHING - This is the key fix!
           ctx.imageSmoothingEnabled = false;
           ctx.mozImageSmoothingEnabled = false;
           ctx.webkitImageSmoothingEnabled = false;
           ctx.msImageSmoothingEnabled = false;
+          
           ctx.drawImage(img, 0, 0);
-
         };
 
         const applyGlitchEffect = (imageData, strength) => {
@@ -1144,6 +1203,7 @@
           if (!currentImage) return;
           
           setIsProcessing(true);
+          setHasProtectedData(false); // ← ADD THIS LINE - image is now altered!
 
           const canvas = canvasRef.current;
           const ctx = getContext(canvas); // Use helper
@@ -1358,10 +1418,107 @@
           setIsProcessing(false);
         };
 
+        // Embed data into image using LSB steganography
+        const embedDataInImage = (canvas, data, password) => {
+          const ctx = canvas.getContext('2d');
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const pixels = imageData.data;
+          
+          // Encrypt the data
+          const encrypted = CryptoJS.AES.encrypt(data, password).toString();
+          
+          // Add length header (first 32 bits = data length)
+          const dataLength = encrypted.length;
+          const fullData = dataLength.toString().padStart(10, '0') + encrypted;
+          
+          // Convert to binary
+          let binaryData = '';
+          for (let i = 0; i < fullData.length; i++) {
+            binaryData += fullData.charCodeAt(i).toString(2).padStart(8, '0');
+          }
+          
+          // Check if we have enough space
+          const maxBits = (pixels.length / 4) * 3; // RGB channels only, not alpha
+          if (binaryData.length > maxBits) {
+            throw new Error('Image too small to embed data');
+          }
+          
+          // Embed bits into LSB of RGB channels
+          let bitIndex = 0;
+          for (let i = 0; i < pixels.length && bitIndex < binaryData.length; i += 4) {
+            // Embed in R, G, B (skip alpha)
+            for (let channel = 0; channel < 3 && bitIndex < binaryData.length; channel++) {
+              const bit = parseInt(binaryData[bitIndex]);
+              pixels[i + channel] = (pixels[i + channel] & 0xFE) | bit; // Clear LSB and set new bit
+              bitIndex++;
+            }
+          }
+          
+          ctx.putImageData(imageData, 0, 0);
+          return canvas;
+        };
+
+        // Extract data from image using LSB steganography
+        const extractDataFromImage = (canvas, password) => {
+          const ctx = canvas.getContext('2d');
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const pixels = imageData.data;
+          
+          // Extract length header (first 80 bits = 10 characters)
+          let binaryLength = '';
+          for (let i = 0; i < 80; i++) {
+            const pixelIndex = Math.floor(i / 3) * 4;
+            const channel = i % 3;
+            binaryLength += (pixels[pixelIndex + channel] & 1).toString();
+          }
+          
+          // Convert binary to length
+          let lengthStr = '';
+          for (let i = 0; i < binaryLength.length; i += 8) {
+            lengthStr += String.fromCharCode(parseInt(binaryLength.substr(i, 8), 2));
+          }
+          const dataLength = parseInt(lengthStr);
+          
+          if (isNaN(dataLength) || dataLength <= 0) {
+            throw new Error('No hidden data found in image');
+          }
+          
+          // Extract encrypted data
+          const totalBits = (dataLength * 8) + 80; // +80 for the length header
+          let binaryData = '';
+          
+          for (let i = 80; i < totalBits && i < pixels.length * 3 / 4; i++) {
+            const pixelIndex = Math.floor(i / 3) * 4;
+            const channel = i % 3;
+            binaryData += (pixels[pixelIndex + channel] & 1).toString();
+          }
+          
+          // Convert binary to string
+          let encrypted = '';
+          for (let i = 0; i < binaryData.length; i += 8) {
+            encrypted += String.fromCharCode(parseInt(binaryData.substr(i, 8), 2));
+          }
+          
+          // Decrypt
+          try {
+            const decrypted = CryptoJS.AES.decrypt(encrypted, password);
+            const original = decrypted.toString(CryptoJS.enc.Utf8);
+            
+            if (!original) {
+              throw new Error('Invalid password');
+            }
+            
+            return original;
+          } catch (e) {
+            throw new Error('Invalid password or corrupted data');
+          }
+        };
+
         const nukeImage = () => {
           if (!currentImage) return;
           
           setIsProcessing(true);
+          setHasProtectedData(false);
           
           // Small delay to show loading state
           setTimeout(() => {
@@ -1472,6 +1629,46 @@
               setHistory(prev => prev.slice(0, -1));
               setNukeCount(prev => Math.max(0, prev - 1));
               setLastEffects([]);
+              
+              // ← ADD THIS SECTION: Re-check for protected data after undo
+              setTimeout(() => {
+                try {
+                  const tempCanvas = document.createElement('canvas');
+                  tempCanvas.width = canvas.width;
+                  tempCanvas.height = canvas.height;
+                  const tempCtx = tempCanvas.getContext('2d');
+                  tempCtx.drawImage(canvas, 0, 0);
+                  
+                  // Try to read length header
+                  const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+                  const pixels = imageData.data;
+                  
+                  let binaryLength = '';
+                  for (let i = 0; i < 80; i++) {
+                    const pixelIndex = Math.floor(i / 3) * 4;
+                    const channel = i % 3;
+                    binaryLength += (pixels[pixelIndex + channel] & 1).toString();
+                  }
+                  
+                  let lengthStr = '';
+                  for (let i = 0; i < binaryLength.length; i += 8) {
+                    lengthStr += String.fromCharCode(parseInt(binaryLength.substr(i, 8), 2));
+                  }
+                  const dataLength = parseInt(lengthStr);
+                  
+                  // If valid length found, image has protected data
+                  if (!isNaN(dataLength) && dataLength > 0 && dataLength < 10000000) {
+                    setHasProtectedData(true);
+                    console.log('🔐 Protected data detected after undo!');
+                  } else {
+                    setHasProtectedData(false);
+                  }
+                } catch (e) {
+                  setHasProtectedData(false);
+                }
+              }, 100);
+              // ← END OF NEW SECTION
+              
               setIsProcessing(false);
               showToast('⏪ Undone!', 'info');
             };
@@ -1479,23 +1676,27 @@
           }, 50);
         };
 
-        const exportImage = async () => {
+        const exportImage = async (withPassword = false) => {
           if (!canvasRef.current) return;
           
+          if (withPassword) {
+            setExportMode('protected');
+            setShowPasswordModal(true);
+            return;
+          }
+          
+          // Normal export (existing code)
           const canvas = canvasRef.current;
           const filename = `nuked-meme-${nukeCount}.png`;
           
-          // Check if we're on mobile and Web Share API is available
           const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
           const canShare = navigator.share && navigator.canShare;
           
           if (isMobile && canShare) {
             try {
-              // Convert canvas to blob
               canvas.toBlob(async (blob) => {
                 const file = new File([blob], filename, { type: 'image/png' });
                 
-                // Check if we can share this file
                 if (navigator.canShare({ files: [file] })) {
                   await navigator.share({
                     files: [file],
@@ -1504,24 +1705,20 @@
                   });
                   showToast('📱 Image shared!', 'success');
                 } else {
-                  // Fallback to download if sharing isn't supported
                   downloadImage(canvas, filename);
                 }
               }, 'image/png');
             } catch (error) {
-              // User cancelled or error occurred
               if (error.name !== 'AbortError') {
                 console.error('Share failed:', error);
                 downloadImage(canvas, filename);
               }
             }
           } else {
-            // Desktop or no share support - use download
             downloadImage(canvas, filename);
           }
         };
 
-        // Helper function for traditional download
         const downloadImage = (canvas, filename) => {
           const link = document.createElement('a');
           link.download = filename;
@@ -1530,8 +1727,180 @@
           showToast(`💾 Exported: ${filename}`, 'success');
         };
 
+
+        const handleProtectedExport = () => {
+          if (!password || password.length < 4) {
+            showToast('⚠️ Password must be at least 4 characters', 'warning');
+            return;
+          }
+          
+          try {
+            setIsProcessing(true);
+            
+            // Create a temporary canvas with the nuked image
+            const tempCanvas = document.createElement('canvas');
+            const nukedCanvas = canvasRef.current;
+            tempCanvas.width = nukedCanvas.width;
+            tempCanvas.height = nukedCanvas.height;
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(nukedCanvas, 0, 0);
+            
+            // Compress and encode original image
+            const originalCanvas = document.createElement('canvas');
+            const originalCtx = originalCanvas.getContext('2d');
+            
+            // Scale down to reduce size (max 800px)
+            const maxSize = 800;
+            let width = currentImage.width;
+            let height = currentImage.height;
+            
+            if (width > maxSize || height > maxSize) {
+              if (width > height) {
+                height = (height / width) * maxSize;
+                width = maxSize;
+              } else {
+                width = (width / height) * maxSize;
+                height = maxSize;
+              }
+            }
+            
+            originalCanvas.width = width;
+            originalCanvas.height = height;
+            originalCtx.drawImage(currentImage, 0, 0, width, height);
+            
+            // Convert to compressed base64
+            const originalData = originalCanvas.toDataURL('image/jpeg', 0.7);
+            
+            // Embed in nuked image
+            embedDataInImage(tempCanvas, originalData, password);
+            
+            // Download
+            const link = document.createElement('a');
+            link.download = `protected-meme-${nukeCount}.png`;
+            link.href = tempCanvas.toDataURL('image/png');
+            link.click();
+            
+            showToast('🔐 Protected image exported!', 'success');
+            setShowPasswordModal(false);
+            setPassword('');
+            setShowPassword(false);
+            setLastTypedIndex(-1);
+            setIsProcessing(false);
+          } catch (error) {
+            console.error('Export failed:', error);
+            showToast('❌ Export failed: ' + error.message, 'warning');
+            setIsProcessing(false);
+          }
+        };
+
+        const handlePasswordChange = (e) => {
+          const displayValue = e.target.value;          
+          // Calculate the actual password by tracking what changed
+          let newPassword = password;
+          
+          if (displayValue.length > password.length) {
+            // Characters were added - get only the new characters
+            const addedChars = displayValue.slice(password.length);
+            newPassword = password + addedChars.replace(/•/g, '');
+          } else if (displayValue.length < password.length) {
+            // Characters were deleted
+            newPassword = password.slice(0, displayValue.length);
+          }
+          
+          setPassword(newPassword);
+          
+          if (!showPassword && newPassword.length > 0) {
+            setLastTypedIndex(newPassword.length - 1);
+            
+          }
+        };
+
+        const togglePasswordVisibility = () => {
+          const newShowPassword = !showPassword;
+          setShowPassword(newShowPassword);
+          setLastTypedIndex(-1);
+        };
+
+        const getPasswordDisplayValue = () => {          
+          if (showPassword) {
+            return password;
+          }
+          
+          if (password.length === 0) {
+            return '';
+          }
+          
+          const display = password.split('').map((char, index) => {
+            return index === lastTypedIndex ? char : '•';
+          }).join('');          
+          return display;
+        };
+
+        const handleRestoreImage = () => {
+          if (!password || password.length < 4) {
+            showToast('⚠️ Password must be at least 4 characters', 'warning');
+            return;
+          }
+          
+          if (!currentImage) {
+            showToast('⚠️ No image loaded', 'warning');
+            return;
+          }
+          
+          try {
+            setIsProcessing(true);
+            
+            // Use the already loaded canvas
+            const canvas = canvasRef.current;
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = canvas.width;
+            tempCanvas.height = canvas.height;
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(canvas, 0, 0);
+            
+            // Extract hidden data
+            const originalData = extractDataFromImage(tempCanvas, password);
+            
+            // Load the original image
+            const originalImg = new Image();
+            originalImg.onload = () => {
+              setCurrentImage(originalImg);
+              setNukeCount(0);
+              setHistory([]);
+              setLastEffects([]);
+              setHasProtectedData(false); // Hide restore button after restoring
+              drawImageToCanvas(originalImg);
+              
+              showToast('✅ Original image restored!', 'success');
+              setShowRestoreModal(false);
+              setPassword('');
+              setShowPassword(false);
+              setLastTypedIndex(-1);
+              setIsProcessing(false);
+            };
+            originalImg.onerror = () => {
+              showToast('❌ Failed to load restored image', 'warning');
+              setIsProcessing(false);
+            };
+            originalImg.src = originalData;
+            
+          } catch (error) {
+            console.error('Restore failed:', error);
+            showToast('❌ ' + error.message, 'warning');
+            setIsProcessing(false);
+          }
+        };
+
         const resetImage = () => {
-          fileInputRef.current.click();
+          setCurrentImage(null);
+          setNukeCount(0);
+          setHistory([]);
+          setLastEffects([]);
+          setHasProtectedData(false);
+          setPassword('');
+          setShowPassword(false);
+          setLastTypedIndex(-1);
+          fileInputRef.current?.click();
         };
 
         return (
@@ -1616,41 +1985,50 @@
                     <button
                       onClick={undoNuke}
                       disabled={history.length === 0}
-                        className={`px-8 py-4 text-white text-xl font-bold rounded-lg transform hover:scale-105 transition-all shadow-lg ${
-                          history.length === 0 
-                            ? 'bg-gray-600 cursor-not-allowed opacity-50' 
-                            : 'bg-gradient-to-r from-yellow-600 to-amber-600 hover:from-yellow-500 hover:to-amber-500'
+                      className={`px-8 py-4 text-white text-xl font-bold rounded-lg transform hover:scale-105 transition-all shadow-lg ${
+                        history.length === 0 
+                          ? 'bg-gray-600 cursor-not-allowed opacity-50' 
+                          : 'bg-gradient-to-r from-yellow-600 to-amber-600 hover:from-yellow-500 hover:to-amber-500'
                       }`}
                     >
                       ↩️ Undo (A) {history.length > 0 && `[${history.length}]`}
                     </button>
 
                     <button
-                      onClick={addOverlay}
-                      className="px-8 py-4 bg-gradient-to-r from-purple-600 to-pink-600 text-white text-xl font-bold rounded-lg hover:from-purple-500 hover:to-pink-500 transform hover:scale-105 transition-all shadow-lg"
-                    >
-                      🎭 Overlay  (Q)
-                    </button>
-
-                    <button
                       onClick={applyPattern}
                       className="px-8 py-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-xl font-bold rounded-lg hover:from-indigo-500 hover:to-purple-500 transform hover:scale-105 transition-all shadow-lg"
                     >
-                      🔲 Pattern  (E)
+                      🔲 Pattern (E)
                     </button>
 
                     <button
-                      onClick={exportImage}
+                      onClick={() => exportImage(false)}
                       className="px-8 py-4 bg-gradient-to-r from-green-600 to-teal-600 text-white text-xl font-bold rounded-lg hover:from-green-500 hover:to-teal-500 transform hover:scale-105 transition-all shadow-lg"
                     >
                       💾 Export (S)
                     </button>
 
                     <button
-                      onClick={resetImage}
-                      className="px-8 py-4 bg-gradient-to-r from-blue-600 to-cyan-600 text-white text-xl font-bold rounded-lg hover:from-blue-500 hover:to-cyan-500 transform hover:scale-105 transition-all shadow-lg"
+                      onClick={() => exportImage(true)}
+                      className="px-8 py-4 bg-gradient-to-r from-emerald-600 to-green-600 text-white text-xl font-bold rounded-lg hover:from-emerald-500 hover:to-green-500 transform hover:scale-105 transition-all shadow-lg"
                     >
-                      🔄 New Image (N)
+                      🔐 Protected (G)
+                    </button>
+
+                    {hasProtectedData && (
+                      <button
+                        onClick={() => setShowRestoreModal(true)}
+                        className="px-8 py-4 bg-gradient-to-r from-cyan-600 to-blue-600 text-white text-xl font-bold rounded-lg hover:from-cyan-500 hover:to-blue-500 transform hover:scale-105 transition-all shadow-lg animate-pulse"
+                      >
+                        🔓 Restore Original
+                      </button>
+                    )}
+
+                    <button
+                      onClick={resetImage}
+                      className="px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xl font-bold rounded-lg hover:from-blue-500 hover:to-indigo-500 transform hover:scale-105 transition-all shadow-lg"
+                    >
+                      🔄 New (N)
                     </button>
                   </div>
 
@@ -1675,11 +2053,138 @@
               )}
 
               <div className="mt-12 text-center text-pink-300 text-sm">
+                <p>Inspired by r/NukedMemes • Crank everything to 11 🎸</p>
                 <p className="mt-2 text-pink-400">
-                  ⌨️ Keyboard: <span className="font-bold">D</span>=Nuke • <span className="font-bold">A</span>=Undo • <span className="font-bold">Q</span>=Overlay • <span className="font-bold">E</span>=Pattern • <span className="font-bold">S</span>=Export • <span className="font-bold">N</span>=New
+                  ⌨️ Keyboard: <span className="font-bold">D</span>=Nuke • <span className="font-bold">A</span>=Undo • <span className="font-bold">E</span>=Pattern • <span className="font-bold">S</span>=Export • <span className="font-bold">G</span>=Protected • <span className="font-bold">N</span>=New
                 </p>
               </div>
             </div>
+
+            {/* Password Modal for Protected Export */}
+            {showPasswordModal && (
+              <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+                <div className="bg-gradient-to-br from-purple-900 to-pink-900 rounded-lg p-8 max-w-md w-full shadow-2xl border-2 border-pink-500">
+                  <h2 className="text-2xl font-bold text-white mb-4">🔐 Password Protect</h2>
+                  <p className="text-pink-200 mb-4 text-sm">
+                    The original image will be hidden inside the nuked version. Only people with the password can restore it!
+                  </p>
+                  
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={getPasswordDisplayValue()}
+                      onChange={handlePasswordChange}
+                      placeholder="Enter password (min 4 chars)"
+                      className="w-full px-4 py-3 pr-12 rounded-lg bg-black/30 text-white border-2 border-pink-400 focus:border-pink-300 outline-none mb-4 font-mono"
+                      onKeyPress={(e) => e.key === 'Enter' && handleProtectedExport()}
+                      autoFocus
+                    />
+                    <button
+                      onClick={togglePasswordVisibility}
+                      className="absolute right-3 top-3 text-pink-300 hover:text-pink-100 transition-colors"
+                      type="button"
+                    >
+                      {showPassword ? (
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        </svg>
+                      ) : (
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                  
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleProtectedExport}
+                      disabled={isProcessing}
+                      className="flex-1 px-6 py-3 bg-gradient-to-r from-green-600 to-teal-600 text-white font-bold rounded-lg hover:from-green-500 hover:to-teal-500 disabled:opacity-50"
+                    >
+                      {isProcessing ? 'Exporting...' : '💾 Export Protected'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowPasswordModal(false);
+                        setPassword('');
+                        setShowPassword(false);
+                        setLastTypedIndex(-1);
+                      }}
+                      className="px-6 py-3 bg-gray-600 text-white font-bold rounded-lg hover:bg-gray-500"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  
+                  <p className="text-pink-300 text-xs mt-4">
+                    ⚠️ Warning: This is NOT military-grade encryption. Don't use for highly sensitive data!
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Password Modal for Restore */}
+            {showRestoreModal && (
+              <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+                <div className="bg-gradient-to-br from-purple-900 to-pink-900 rounded-lg p-8 max-w-md w-full shadow-2xl border-2 border-pink-500">
+                  <h2 className="text-2xl font-bold text-white mb-4">🔓 Restore Original</h2>
+                  <p className="text-pink-200 mb-4 text-sm">
+                    Enter the password to restore the original image from this protected file.
+                  </p>
+                  
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={getPasswordDisplayValue()}
+                      onChange={handlePasswordChange}
+                      placeholder="Enter password"
+                      className="w-full px-4 py-3 pr-12 rounded-lg bg-black/30 text-white border-2 border-pink-400 focus:border-pink-300 outline-none mb-4 font-mono"
+                      onKeyPress={(e) => e.key === 'Enter' && handleRestoreImage()}
+                      autoFocus
+                    />
+                    <button
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-3 text-pink-300 hover:text-pink-100 transition-colors"
+                      type="button"
+                    >
+                      {showPassword ? (
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        </svg>
+                      ) : (
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                  
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleRestoreImage}
+                      disabled={isProcessing}
+                      className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-cyan-600 text-white font-bold rounded-lg hover:from-blue-500 hover:to-cyan-500 disabled:opacity-50"
+                    >
+                      {isProcessing ? 'Restoring...' : '🔓 Restore'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowRestoreModal(false);
+                        setPassword('');
+                        setShowPassword(false);
+                        setLastTypedIndex(-1);
+                      }}
+                      className="px-6 py-3 bg-gray-600 text-white font-bold rounded-lg hover:bg-gray-500"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         );
     };
